@@ -7,7 +7,7 @@
 
 /* ********** STRUCTURES ********** */
 
-typedef struct testfw_t // NOT SUR OF THE WAY TO DECLARE IT
+struct testfw_t // NOT SUR OF THE WAY TO DECLARE IT
 {
     char *program;
     int timeout;
@@ -16,17 +16,22 @@ typedef struct testfw_t // NOT SUR OF THE WAY TO DECLARE IT
     bool silent;
     bool verbose;
     struct test_t * tests[TEST_SIZE];
-}testfw_t;
+    int tests_lengh;
+};
 
 /* ********** FRAMEWORK ********** */
 
 struct testfw_t *testfw_init(char *program, int timeout, char *logfile, char *cmd, bool silent, bool verbose)
 {
+    // precisions in .h :
+    //logfile : else NULL
+    //cmd : else NULL
+    //timeout: else 0
     //TO DO ? : ALLOC/MALLOC/REALLOC I DON'T KNOW
-    testfw_t t = { .program = program, .timeout = timeout, .logfile = logfile, .cmd = cmd, .silent = silent, .verbose = verbose };
+    struct testfw_t fw = { .program = program, .timeout = timeout, .logfile = logfile, .cmd = cmd, .silent = silent, .verbose = verbose, .tests_lengh = 0};
     for(int i = 0; i< TEST_SIZE; i++)
-        t.tests[i] = NULL;
-    return &t;
+        fw.tests[i] = NULL;
+    return &fw; // GOOD ?
 }
 
 void testfw_free(struct testfw_t *fw)
@@ -36,18 +41,13 @@ void testfw_free(struct testfw_t *fw)
 
 int testfw_length(struct testfw_t *fw)
 {
-    // SHOULD BE ENOUGH
-    int length = 0;
-    for(int i = 0; i<TEST_SIZE; i++)
-       if(fw->tests[i] != NULL)
-            length++;
-    return length;
+    return fw->tests_lengh;
 }
 
 struct test_t *testfw_get(struct testfw_t *fw, int k)
 {
     // SHOULD BE ENOUGH
-    if(k>=TEST_SIZE)    // to avoid a crash
+    if(k>=TEST_SIZE || k<0)    // to avoid a crash
         return NULL;
     return fw->tests[k];
 }
@@ -56,7 +56,10 @@ struct test_t *testfw_get(struct testfw_t *fw, int k)
 
 struct test_t *testfw_register_func(struct testfw_t *fw, char *suite, char *name, testfw_func_t func)
 {
-    return NULL;
+    struct test_t test = { .func = func, .suite = suite, .name = name};
+    fw->tests[fw->tests_lengh] = fw;
+    fw->tests_lengh++;
+    return &test; // GOOD ?
 }
 
 struct test_t *testfw_register_symb(struct testfw_t *fw, char *suite, char *name)
