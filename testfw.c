@@ -15,7 +15,7 @@ struct testfw_t // NOT SUR OF THE WAY TO DECLARE IT
     char *cmd;
     bool silent;
     bool verbose;
-    struct test_t * tests[TEST_SIZE];
+    struct test_t *tests[TEST_SIZE];
     int tests_lengh;
 };
 
@@ -28,15 +28,26 @@ struct testfw_t *testfw_init(char *program, int timeout, char *logfile, char *cm
     //cmd : else NULL
     //timeout: else 0
     //TO DO ? : ALLOC/MALLOC/REALLOC I DON'T KNOW
-    struct testfw_t fw = { .program = program, .timeout = timeout, .logfile = logfile, .cmd = cmd, .silent = silent, .verbose = verbose, .tests_lengh = 0};
+    struct testfw_t *fw = (testfw_t *)malloc(sizeof(testfw_t));
+    fw->program = program;
+    fw->timeout = timeout;
+    fw->logfile = logfile;
+    fw->cmd = cmd;
+    fw->silent = silent;
+    fw->verbose = verbose;
+    fw->tests = malloc(sizeof(test_t));
     for(int i = 0; i< TEST_SIZE; i++)
-        fw.tests[i] = NULL;
-    return &fw; // GOOD ?
+        fw->tests[i] = NULL;
+    fw->tests_lenght = 0;
+    return fw; // GOOD ?
 }
 
 void testfw_free(struct testfw_t *fw)
 {
-    //TODO : FREE THE STRUCT CONTENT AND THE STRUCTURE ITSELF ?
+  free(fw->tests);
+  free(fw);
+  fw = NULL;
+    //TODO : FREE THE STRUCT CONTENT AND THE STRUCTURE ITSELF ? the free function frees the strcuture and its content
 }
 
 int testfw_length(struct testfw_t *fw)
