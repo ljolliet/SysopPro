@@ -1,6 +1,10 @@
 #ifndef test_H
 #define test_H
 
+#ifdef NDEBUG
+#error "Error: don't compile sample.c with NDBUG macro!"
+#endif
+
 /**
  * @brief return success
  */
@@ -31,25 +35,10 @@ int test_assert(int argc, char *argv[]);
  */
 int test_sleep(int argc, char *argv[]);
 
-/**
+/*
  * @brief test argv aruments
  */
 int test_args(int argc, char *argv[]);
-
-/**
- * @brief test infinite loop
- */
-int test_infiniteloop(int argc, char *argv[]);
-
-/**
- * @brief print hello
- */
-int test_hello(int argc, char *argv[]);
-
-/**
- * @brief print goodbye
- */
-int test_goodbye(int argc, char *argv[]);
 
 /**
  * @brief return success

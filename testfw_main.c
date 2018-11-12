@@ -168,6 +168,7 @@ int main(int argc, char *argv[])
     int length = testfw_length(fw);
     if (length == 0)
     {
+        free(cmd);
         fprintf(stderr, "Error: no tests are registred in suite \"%s\"!\n", suite);
         return EXIT_FAILURE;
     }
