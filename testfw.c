@@ -10,7 +10,7 @@
 
 /* ********** STRUCTURES ********** */
 
-struct testfw_t // NOT SUR OF THE WAY TO DECLARE IT
+struct testfw_t 
 {
     char *program;
     int timeout;
@@ -37,7 +37,6 @@ struct testfw_t *testfw_init(char *program, int timeout, char *logfile, char *cm
     fw->cmd = cmd;
     fw->silent = silent;
     fw->verbose = verbose;
- //   fw->tests = (struct test_t *)malloc(sizeof(struct test_t));
     for(int i = 0; i< TEST_SIZE; i++)
         fw->tests[i] = NULL;
     fw->tests_length = 0;
@@ -46,21 +45,35 @@ struct testfw_t *testfw_init(char *program, int timeout, char *logfile, char *cm
 
 void testfw_free(struct testfw_t *fw)
 {
- // free(fw->tests);
+ if(fw == NULL){
+
+ }
+ else{
   free(fw);
   fw = NULL; // TO CHECK
+ }
 }
 
 int testfw_length(struct testfw_t *fw)
 {
-    return fw->tests_length;
+
+    if(fw == NULL)
+        return -1; // smthg else ?
+    else{
+        printf("length : %d\n", fw->tests_length);
+        return fw->tests_length;
+    }
 }
 
 struct test_t *testfw_get(struct testfw_t *fw, int k)
 {
-    // SHOULD BE ENOUGH
-    if(k>=TEST_SIZE || k<0)    // to avoid a crash
-        return NULL;
+
+    printf("k : %d\n", k); 
+    if(k>=TEST_SIZE || k<0 || fw == NULL)    // to avoid a crash
+        return NULL; // smthg else ?
+    
+    printf("get : %s.%s", fw->tests[k]->suite, fw->tests[k]->name); 
+       
     return fw->tests[k];
 }
 
@@ -68,38 +81,68 @@ struct test_t *testfw_get(struct testfw_t *fw, int k)
 
 struct test_t *testfw_register_func(struct testfw_t *fw, char *suite, char *name, testfw_func_t func)
 {
-    printf("register func\n");
+    // check pointers
 
-    struct test_t test = { .func = func, .suite = suite, .name = name};
-    fw->tests[fw->tests_length] = fw; // TODO CHECK SIZE
+    struct test_t * test = (struct test_t *) malloc(sizeof(struct test_t));
+    test->suite = suite;
+    test->name = name;
+    test->func = func;
+
+    fw->tests[fw->tests_length] = test; // TODO CHECK SIZE
+    printf("register : %s.%s at %d\n" , suite, name, fw->tests_length);
     fw->tests_length++;
-    return &test; 
+
+    return test; 
 }
 
 struct test_t *testfw_register_symb(struct testfw_t *fw, char *suite, char *name)
 {
-    printf("register symb\n");
+        // check pointers
+//typedef int (*testfw_func_t)(int argc, char *argv[]);
 
-    testfw_func_t * func = NULL;    
+
     char * underscore = "_";
-    char * funcname = (char *) malloc(strlen(name)+strlen(suite)+strlen(underscore));   // final name with size of name+_+suite
+    char * funcname = (char *) malloc(strlen(name)+strlen(suite)+strlen(underscore));   // final function name with size of name+_+suite
     strcpy(funcname,suite); //funcname = suite
     strcat(funcname,underscore);    //funcname = suite_
     strcat(funcname, name); //funcame = suite_name
     void * handle = dlopen(fw->program, RTLD_LAZY); // open program exec
-    func = dlsym(handle, funcname);    //find function in exec
-    struct test_t test = { .func = func, .suite = suite, .name = name};
-    fw->tests[fw->tests_length] = fw; // TODO CHECK SIZE
-    fw->tests_length++;
-    dlclose(handle);    // close exec
+    struct testfw_func_t * func = (struct testfw_func_t *)dlsym(handle, funcname);
+    dlclose(handle);  // SEGFAULT IS HERE  
+    if(func == NULL)
+        printf("func null\n");
+
     free(funcname); //free malloc funcname
-    
-    return &test; 
+    struct test_t *t = testfw_register_func(fw,suite,name,func); 
+    return t;
 }
 
 int testfw_register_suite(struct testfw_t *fw, char *suite)
 {
-    printf("register suite\n");
+    char * name = NULL;
+    size_t len = 0;
+    ssize_t read;
+
+            // check pointers
+    
+    char * cmd = (char *) malloc(100);   // CHECK SIZE
+    strcpy(cmd,"nm "); // cmd = nm
+    strcat(cmd, fw->program); // cmd = nm <program>
+    strcat(cmd," | cut -d ' ' -f 3 | grep ^"); // ...
+    strcat(cmd,suite);
+    strcat(cmd,"_");
+    strcat(cmd," | cut -d \"_\" -f 2"); // to get only the <name>
+
+
+
+
+    FILE  * fp =  popen(cmd,"r");
+
+     while (read = getline(&name, &len, fp) != -1) {
+        testfw_register_symb(fw,suite,name);
+    }
+    int status = pclose(fp);
+    free(cmd);
 
     return 0;
 }
@@ -108,5 +151,7 @@ int testfw_register_suite(struct testfw_t *fw, char *suite)
 
 int testfw_run_all(struct testfw_t *fw, int argc, char *argv[], enum testfw_mode_t mode)
 {
+        // check pointers
+
     return 0;
 }

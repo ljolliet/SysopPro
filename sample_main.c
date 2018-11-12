@@ -6,7 +6,7 @@
 #define TIMEOUT 2
 #define LOGFILE "test.log"
 #define SILENT false
-#define VERBOSE true
+#define VERBOSE false
 #define COMMAND NULL
 
 int main(int argc, char *argv[])
