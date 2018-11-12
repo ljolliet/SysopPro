@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <dlfcn.h>
 #include <string.h>
+#include <stdlib.h>
 
 #include "testfw.h"
 
@@ -67,42 +68,38 @@ struct test_t *testfw_get(struct testfw_t *fw, int k)
 
 struct test_t *testfw_register_func(struct testfw_t *fw, char *suite, char *name, testfw_func_t func)
 {
-                printf("register func\n");
+    printf("register func\n");
 
     struct test_t test = { .func = func, .suite = suite, .name = name};
-    fw->tests[fw->tests_length] = fw; // CHECK SIZE
-    printf("length ++");
+    fw->tests[fw->tests_length] = fw; // TODO CHECK SIZE
     fw->tests_length++;
     return &test; 
 }
 
 struct test_t *testfw_register_symb(struct testfw_t *fw, char *suite, char *name)
 {
-            printf("register symb\n");
+    printf("register symb\n");
 
-    testfw_func_t * func = NULL;    // how to 
-    char * funcname = strcat(suite, "_");
-        name = "success";
-    funcname = strcat(funcname, name);
-    printf("name : %s\n", name);
-    printf("funcname : %s\n", funcname);
-    printf("program : %s\n", fw->program);
-    void * handle = dlopen(fw->program, RTLD_LAZY);
-    func = dlsym(handle, funcname);
+    testfw_func_t * func = NULL;    
+    char * underscore = "_";
+    char * funcname = (char *) malloc(strlen(name)+strlen(suite)+strlen(underscore));   // final name with size of name+_+suite
+    strcpy(funcname,suite); //funcname = suite
+    strcat(funcname,underscore);    //funcname = suite_
+    strcat(funcname, name); //funcame = suite_name
+    void * handle = dlopen(fw->program, RTLD_LAZY); // open program exec
+    func = dlsym(handle, funcname);    //find function in exec
     struct test_t test = { .func = func, .suite = suite, .name = name};
-    fw->tests[fw->tests_length] = fw; // CHECK SIZE
+    fw->tests[fw->tests_length] = fw; // TODO CHECK SIZE
     fw->tests_length++;
-        printf("length ++\n");
-
-    dlclose(handle);
+    dlclose(handle);    // close exec
+    free(funcname); //free malloc funcname
+    
     return &test; 
 }
 
 int testfw_register_suite(struct testfw_t *fw, char *suite)
 {
-                printf("register suite\n");
-
-            printf("length pas ++\n");
+    printf("register suite\n");
 
     return 0;
 }
