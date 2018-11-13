@@ -10,7 +10,7 @@
 
 /* ********** STRUCTURES ********** */
 
-struct testfw_t 
+struct testfw_t
 {
     char *program;
     int timeout;
@@ -37,43 +37,54 @@ struct testfw_t *testfw_init(char *program, int timeout, char *logfile, char *cm
     fw->cmd = cmd;
     fw->silent = silent;
     fw->verbose = verbose;
-    for(int i = 0; i< TEST_SIZE; i++)
+    for (int i = 0; i < TEST_SIZE; i++)
         fw->tests[i] = NULL;
     fw->tests_length = 0;
-    return fw; // GOOD ?
+    return fw;
 }
 
 void testfw_free(struct testfw_t *fw)
 {
- if(fw == NULL){
-
- }
- else{
-  free(fw);
-  fw = NULL; // TO CHECK
- }
+    if (fw == NULL)
+    {
+        fprintf(stderr, "testfw_t pointer is NULL, impossible to free");
+        exit(EXIT_FAILURE);
+    }
+    else
+    {
+        free(fw);  // free all the content of the structure
+        fw = NULL; // TO CHECK
+    }
 }
 
 int testfw_length(struct testfw_t *fw)
 {
-
-    if(fw == NULL)
-        return -1; // smthg else ?
-    else{
-        printf("length : %d\n", fw->tests_length);
-        return fw->tests_length;
+    if (fw == NULL)
+    {
+        fprintf(stderr, "testfw_t pointer is NULL, impossible to get length");
+        exit(EXIT_FAILURE);
     }
+    return fw->tests_length;
 }
 
 struct test_t *testfw_get(struct testfw_t *fw, int k)
 {
 
-    printf("k : %d\n", k); 
-    if(k>=TEST_SIZE || k<0 || fw == NULL)    // to avoid a crash
-        return NULL; // smthg else ?
-    
-    printf("get : %s.%s", fw->tests[k]->suite, fw->tests[k]->name); 
-       
+    if (fw == NULL)
+    {
+        fprintf(stderr, "testfw_t pointer is NULL, impossible to get an element of it");
+        exit(EXIT_FAILURE);
+    }
+    else if (k < 0)
+    {
+        fprintf(stderr, "impossible to get a negative element");
+        exit(EXIT_FAILURE);
+    }
+    else if (k >= TEST_SIZE)
+    {
+        fprintf(stderr, "impossible to get an element out of the array");
+        exit(EXIT_FAILURE);
+    }
     return fw->tests[k];
 }
 
@@ -81,77 +92,116 @@ struct test_t *testfw_get(struct testfw_t *fw, int k)
 
 struct test_t *testfw_register_func(struct testfw_t *fw, char *suite, char *name, testfw_func_t func)
 {
-    // check pointers
+    if (fw == NULL)
+    {
+        fprintf(stderr, "testfw_t pointer is NULL, impossible to register a function in it");
+        exit(EXIT_FAILURE);
+    }
+    else if (suite == NULL)
+    {
+        fprintf(stderr, "suite pointer is NULL, impossible to register a test without a test suite");
+        exit(EXIT_FAILURE);
+    }
+    else if (name == NULL)
+    {
+        fprintf(stderr, "name pointer is NULL, impossible to register a test without a test name");
+        exit(EXIT_FAILURE);
+    }
 
-    struct test_t * test = (struct test_t *) malloc(sizeof(struct test_t));
+    //CHECK FUNC ?
+
+    struct test_t *test = (struct test_t *)malloc(sizeof(struct test_t)); // free in the testfw_free
     test->suite = suite;
     test->name = name;
     test->func = func;
 
-    fw->tests[fw->tests_length] = test; // TODO CHECK SIZE
-    printf("register : %s.%s at %d\n" , suite, name, fw->tests_length);
+    if (fw->tests_length >= TEST_SIZE)
+    {
+        fprintf(stderr, "impossible to add an element out of the array");
+        exit(EXIT_FAILURE);
+    }
+    fw->tests[fw->tests_length] = test;
     fw->tests_length++;
 
-    return test; 
+    return test;
 }
 
 struct test_t *testfw_register_symb(struct testfw_t *fw, char *suite, char *name)
 {
-        // check pointers
-//typedef int (*testfw_func_t)(int argc, char *argv[]);
-
-
-    char * underscore = "_";
-    char * funcname = (char *) malloc(strlen(name)+strlen(suite)+strlen(underscore));   // final function name with size of name+_+suite
-    strcpy(funcname,suite); //funcname = suite
-    strcat(funcname,underscore);    //funcname = suite_
-    strcat(funcname, name); //funcame = suite_name
-    void * handle = dlopen(fw->program, RTLD_LAZY); // open program exec
+    if (fw == NULL)
+    {
+        fprintf(stderr, "testfw_t pointer is NULL, impossible to register (symb) a function in it");
+        exit(EXIT_FAILURE);
+    }
+    else if (suite == NULL)
+    {
+        fprintf(stderr, "suite pointer is NULL, impossible to register (symb) a test without a test suite");
+        exit(EXIT_FAILURE);
+    }
+    else if (name == NULL)
+    {
+        fprintf(stderr, "name pointer is NULL, impossible to register (symb) a test without a test name");
+        exit(EXIT_FAILURE);
+    }
+    char *underscore = "_";
+    char *funcname = (char *)malloc(strlen(name) + strlen(suite) + strlen(underscore)); // final function name with size of name+_+suite
+    strcpy(funcname, suite);                                                            //funcname = suite
+    strcat(funcname, underscore);                                                       //funcname = suite_
+    strcat(funcname, name);                                                             //funcame = suite_name
+    void *handle = dlopen(fw->program, RTLD_LAZY);                                      // open program exec
     struct testfw_func_t * func = (struct testfw_func_t *)dlsym(handle, funcname);
-    dlclose(handle);  // SEGFAULT IS HERE  
+    // dlclose(handle); // SEGFAULT IS HERE
     if(func == NULL)
         printf("func null\n");
 
     free(funcname); //free malloc funcname
-    struct test_t *t = testfw_register_func(fw,suite,name,func); 
+    struct test_t *t = testfw_register_func(fw, suite, name,func); // func is a pointer ?
     return t;
 }
 
 int testfw_register_suite(struct testfw_t *fw, char *suite)
 {
-    char * name = NULL;
-    size_t len = 0;
-    ssize_t read;
-
-            // check pointers
-    
-    char * cmd = (char *) malloc(100);   // CHECK SIZE
-    strcpy(cmd,"nm "); // cmd = nm
-    strcat(cmd, fw->program); // cmd = nm <program>
-    strcat(cmd," | cut -d ' ' -f 3 | grep ^"); // ...
-    strcat(cmd,suite);
-    strcat(cmd,"_");
-    strcat(cmd," | cut -d \"_\" -f 2"); // to get only the <name>
-
-
-
-
-    FILE  * fp =  popen(cmd,"r");
-
-     while (read = getline(&name, &len, fp) != -1) {
-        testfw_register_symb(fw,suite,name);
+     if (fw == NULL)
+    {
+        fprintf(stderr, "testfw_t pointer is NULL, impossible to register a suite in it");
+        exit(EXIT_FAILURE);
     }
-    int status = pclose(fp);
+    else if (suite == NULL)
+    {
+        fprintf(stderr, "suite pointer is NULL, impossible to register a suite without a test suite");
+        exit(EXIT_FAILURE);
+    }
+    char *name = NULL;
+    int size = 0;
+    size_t len = 0;
+
+    char *cmd = (char *)malloc(100);            // CHECK SIZE
+    strcpy(cmd, "nm ");                         // cmd = nm
+    strcat(cmd, fw->program);                   // cmd = nm <program>
+    strcat(cmd, " | cut -d ' ' -f 3 | grep ^"); // ...
+    strcat(cmd, suite);
+    strcat(cmd, "_");                    // grep <suite>_*
+    strcat(cmd, " | cut -d \"_\" -f 2"); // to get only the <name> (without <suite>_)
+
+    FILE *fp = popen(cmd, "r");
+
+    while (getline(&name, &len, fp) != -1)
+    {
+        printf("%s\n", name);
+        testfw_register_symb(fw, suite, name);
+        size++;
+    }
+    pclose(fp); //check value
     free(cmd);
 
-    return 0;
+    return size;
 }
 
 /* ********** RUN TEST ********** */
 
 int testfw_run_all(struct testfw_t *fw, int argc, char *argv[], enum testfw_mode_t mode)
 {
-        // check pointers
+    // check pointers
 
     return 0;
 }
