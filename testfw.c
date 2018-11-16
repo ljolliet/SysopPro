@@ -18,7 +18,7 @@ struct testfw_t
     char *cmd;
     bool silent;
     bool verbose;
-    struct test_t *tests[TEST_SIZE];
+    struct test_t tests[TEST_SIZE];
     int tests_length;
 };
 
@@ -37,8 +37,12 @@ struct testfw_t *testfw_init(char *program, int timeout, char *logfile, char *cm
     fw->cmd = cmd;
     fw->silent = silent;
     fw->verbose = verbose;
-    for (int i = 0; i < TEST_SIZE; i++)
-        fw->tests[i] = NULL;
+    for(int i =0;i<TEST_SIZE;i++){
+        fw->tests[i].name = (char *)malloc(100);  // TODO FREEEEEEE
+        fw->tests[i].suite = (char *)malloc(100);  // TODO FREEEEEEE
+
+    }
+
     fw->tests_length = 0;
     return fw;
 }
@@ -85,7 +89,7 @@ struct test_t *testfw_get(struct testfw_t *fw, int k)
         fprintf(stderr, "impossible to get an element out of the array\n");
         exit(EXIT_FAILURE);
     }
-    return fw->tests[k];
+    return &fw->tests[k];
 }
 
 /* ********** REGISTER TEST ********** */
@@ -108,15 +112,11 @@ struct test_t *testfw_register_func(struct testfw_t *fw, char *suite, char *name
         exit(EXIT_FAILURE);
     }
 
-        for(int i = 0; i< fw->tests_length; i++)
-        printf("%d : %s\n",i, fw->tests[i]->name);
     //CHECK FUNC ?
-
-   struct test_t *test  = (struct test_t *)malloc(sizeof(struct test_t)); // free in the testfw_free
     
-    test->suite = suite;
-    test->name = name;
-    test->func = func;
+    strcpy(fw->tests[fw->tests_length].suite ,suite); // strcopy
+    strcpy(fw->tests[fw->tests_length].name,name);
+    fw->tests[fw->tests_length].func = func;
 
 
   
@@ -124,15 +124,9 @@ struct test_t *testfw_register_func(struct testfw_t *fw, char *suite, char *name
     {
         fprintf(stderr, "impossible to add an element out of the array\n");
         exit(EXIT_FAILURE);
-    }
-   
-    fw->tests[fw->tests_length] = test;
+    } 
     fw->tests_length++;
-
-        for(int i = 0; i< fw->tests_length; i++)
-        printf("%d : %s\n",i, fw->tests[i]->name);
-
-    return test;
+    return &fw->tests[fw->tests_length-1];
 }
 
 struct test_t *testfw_register_symb(struct testfw_t *fw, char *suite, char *name)
@@ -153,19 +147,19 @@ struct test_t *testfw_register_symb(struct testfw_t *fw, char *suite, char *name
         exit(EXIT_FAILURE);
     }
     char *underscore = "_";
-    char *funcname = (char *)malloc(strlen(name) + strlen(suite) + strlen(underscore)); // final function name with size of name+_+suite
+    int size = strlen(name) + strlen(suite) + strlen(underscore);
+    char *funcname = (char *)malloc(size); // final function name with size of name+_+suite
     strcpy(funcname, suite);                                                            //funcname = suite
     strcat(funcname, underscore);                                                       //funcname = suite_
-    strcat(funcname, name);                                                             //funcame = suite_name
-    void *handle = dlopen(fw->program, RTLD_LAZY);                                      // open program exec
-    testfw_func_t  func = ( testfw_func_t)dlsym(handle, funcname);
-     dlclose(handle); // SEGFAULT IS HERE
-    if(func == NULL)
-        printf("func null\n");  //do something else
+    strcat(funcname, name);                                                            //funcame = suite_name
+    void *handle = dlopen("./sample", RTLD_LAZY );                                      // open program exec
+     testfw_func_t func = dlsym(handle, funcname);
+        if(func == NULL)
+            printf("func null");
+   //  dlclose(handle); // SEGFAULT IS HERE
 
     free(funcname); //free malloc funcname
-    struct test_t *t = testfw_register_func(fw, suite, name,func); // func is a pointer ?
-    return t;
+    return  testfw_register_func(fw, suite, name,func);
 }
 
 int testfw_register_suite(struct testfw_t *fw, char *suite)
@@ -196,10 +190,12 @@ int testfw_register_suite(struct testfw_t *fw, char *suite)
 
     while (getline(&name, &len, fp) != -1)
     {
-       // printf("%s\n", name);
+        name[strlen(name)-1] = 0;
         testfw_register_symb(fw, suite, name);
         size++;
     }
+
+
     pclose(fp); //check value
     free(cmd);
 
