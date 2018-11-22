@@ -5,6 +5,10 @@
 #include <dlfcn.h>
 #include <string.h>
 #include <stdlib.h>
+#include <signal.h>
+//#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 #include "testfw.h"
 
@@ -140,15 +144,15 @@ struct test_t *testfw_register_symb(struct testfw_t *fw, char *suite, char *name
         fprintf(stderr, "name pointer is NULL, impossible to register (symb) a test without a test name\n");
         exit(EXIT_FAILURE);
     }
-   
+
     int size = strlen(name) + strlen(suite) + strlen(fw->separator);
     char *funcname = (char *)malloc(size);        // final function name with size of name+_+suite
     strcpy(funcname, suite);                      //funcname = suite
-    strcat(funcname, fw->separator);                  //funcname = suite_
+    strcat(funcname, fw->separator);              //funcname = suite_
     strcat(funcname, name);                       //funcame = suite_name
     void *handle = dlopen("./sample", RTLD_LAZY); // open program exec
     testfw_func_t func = dlsym(handle, funcname);
-    //  dlclose(handle); // SEGFAULT  HERE
+    //dlclose(handle); // SEGFAULT  HERE
     if (func == NULL)
     {
         fprintf(stderr, "func pointer is NULL, impossible to register\n");
@@ -179,7 +183,7 @@ int testfw_register_suite(struct testfw_t *fw, char *suite)
     strcat(cmd, fw->program);                   // cmd = nm <program>
     strcat(cmd, " | cut -d ' ' -f 3 | grep ^"); // ...
     strcat(cmd, suite);
-    strcat(cmd, fw->separator);                    // grep <suite>_*
+    strcat(cmd, fw->separator);          // grep <suite>_*
     strcat(cmd, " | cut -d \"_\" -f 2"); // to get only the <name> (without <suite>_)
 
     FILE *fp = popen(cmd, "r");
@@ -210,7 +214,81 @@ int testfw_register_suite(struct testfw_t *fw, char *suite)
 
 int testfw_run_all(struct testfw_t *fw, int argc, char *argv[], enum testfw_mode_t mode)
 {
-    // check pointers
+    printf("RUN_ALL\n");
+    char *message = (char *)malloc(100);
+    int nb_tests_failed = 0;
 
-    return 0;
+    // check pointers
+    if (fw == NULL)
+    {
+        fprintf(stderr, "testfw_t pointer is NULL, impossible to register a suite in it\n");
+        exit(EXIT_FAILURE);
+    }
+    /*Cette fonction retourne le nombre de tests qui échouent ou zéro en cas de succès. En outre, elle affiche sur sa sortie standard (sauf en mode silent) le résultat des tests avec le format suivant, illustré par quelques tests fournis dans sample.c :
+
+[SUCCESS] run test "test.hello" in 0.47 ms (status 0)
+[TIMEOUT] run test "test.infiniteloop" in 2000.19 ms (status 124)
+[KILLED] run test "test.segfault" in 0.14 ms (signal "Segmentation fault")
+[FAILURE] run test "test.failure" in 0.40 ms (status 1)
+
+
+* FAILURE: return EXIT_FAILURE or 1 (or any value different of EXIT_SUCCESS)
+* KILLED: killed by any signal (SIGSEGV, SIGABRT, ...)
+* TIMEOUT: after a time limit, return an exit status of 124 (following the convention used in *timeout* command)
+*/
+
+    /*
+  * *timeout* : la commande est interrompue si elle dépasse une limite de temps (et elle renvoie le status 124) ; 
+  * *logfile* : la sortie standard du test (et sa sortie d'erreur) sont redirigées dans un fichier ;
+  * *cmd* : la sortie standard du test (et sa sortie d'erreur) sont redirigés sur l'entrée standard d'une commande shell grâce aux fonctions popen/pclose (cf. man).*/
+
+
+//https://stackoverflow.com/questions/840501/how-do-function-pointers-in-c-work
+    if (mode == TESTFW_FORKS)
+    {
+        pid_t pid = fork();
+        if (pid == 0)
+        {
+            printf("SON\n");
+            for (int i = 0; i < fw->tests_length; i++)
+            {
+                int status = 0;
+                //status = (int) fw->tests[i].func(argc, argv);
+                // testfw_func_t * func = &fw->tests[i].func;
+               // status = (*func)(argc, argv);
+
+               //testfw_func_t func = fw->tests[i].func;
+                //status = (*func)(argc, argv);
+
+                printf("DONE\n");
+
+                if (!fw->silent)
+                {
+                    if (status == EXIT_SUCCESS)
+                        message = "SUCCESS";
+                    else
+                    {
+                        if (status == EXIT_FAILURE) // AND OTHER VALUES
+                            message = "FAILURE";
+                        else
+                            message = "ELSE";
+
+                        nb_tests_failed++;
+                    }
+
+                    printf("[%s] run test \"%s.%s\" in %d ms (status %d)\n", message, fw->tests[i].suite, fw->tests[i].name, -1, status);
+                }
+            }
+        }
+        wait(NULL); 
+        //waitpid(pid, NULL, NULL);
+        printf("DAD\n");
+    }
+    else if (mode == TESTFW_NOFORK)
+    {
+        //same thing
+    }
+    free(message);
+
+    return nb_tests_failed;
 }
