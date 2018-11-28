@@ -6,7 +6,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <signal.h>
-//#include <sys/types.h>
+#include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -145,21 +145,31 @@ struct test_t *testfw_register_symb(struct testfw_t *fw, char *suite, char *name
         exit(EXIT_FAILURE);
     }
 
-    int size = strlen(name) + strlen(suite) + strlen(fw->separator);
+    int size = strlen(name) + strlen(suite) + strlen(fw->separator)+1;
+    //int size = 100;
     char *funcname = (char *)malloc(size);        // final function name with size of name+_+suite
     strcpy(funcname, suite);                      //funcname = suite
     strcat(funcname, fw->separator);              //funcname = suite_
     strcat(funcname, name);                       //funcame = suite_name
-    void *handle = dlopen("./sample", RTLD_LAZY); // open program exec
-    testfw_func_t func = dlsym(handle, funcname);
-    //dlclose(handle); // SEGFAULT  HERE
+
+    void *handle = dlopen(NULL, RTLD_LAZY); // open program exec
+
+    if (!handle) {
+        fprintf(stderr, "%s\n", dlerror());
+        exit(EXIT_FAILURE);
+    }
+    dlerror();    /* Clear any existing error */
+
+    testfw_func_t func = (testfw_func_t)dlsym(handle, funcname);
+    
+    dlclose(handle); 
     if (func == NULL)
     {
         fprintf(stderr, "func pointer is NULL, impossible to register\n");
         exit(EXIT_FAILURE);
     }
     free(funcname); //free malloc funcname
-    return testfw_register_func(fw, suite, name, func);
+    return testfw_register_func(fw, suite, name, *func);
 }
 
 int testfw_register_suite(struct testfw_t *fw, char *suite)
@@ -242,8 +252,7 @@ int testfw_run_all(struct testfw_t *fw, int argc, char *argv[], enum testfw_mode
   * *logfile* : la sortie standard du test (et sa sortie d'erreur) sont redirigées dans un fichier ;
   * *cmd* : la sortie standard du test (et sa sortie d'erreur) sont redirigés sur l'entrée standard d'une commande shell grâce aux fonctions popen/pclose (cf. man).*/
 
-
-//https://stackoverflow.com/questions/840501/how-do-function-pointers-in-c-work
+    //https://stackoverflow.com/questions/840501/how-do-function-pointers-in-c-work
     if (mode == TESTFW_FORKS)
     {
         pid_t pid = fork();
@@ -252,13 +261,14 @@ int testfw_run_all(struct testfw_t *fw, int argc, char *argv[], enum testfw_mode
             printf("SON\n");
             for (int i = 0; i < fw->tests_length; i++)
             {
+                printf("LAUNCHING FUNCTION\n");
+
                 int status = 0;
                 //status = (int) fw->tests[i].func(argc, argv);
-                // testfw_func_t * func = &fw->tests[i].func;
-               // status = (*func)(argc, argv);
 
-               //testfw_func_t func = fw->tests[i].func;
-                //status = (*func)(argc, argv);
+
+                testfw_func_t *functionPtr = &fw->tests[i].func;
+                status = (*functionPtr)(argc, argv);
 
                 printf("DONE\n");
 
@@ -280,7 +290,7 @@ int testfw_run_all(struct testfw_t *fw, int argc, char *argv[], enum testfw_mode
                 }
             }
         }
-        wait(NULL); 
+        wait(NULL);
         //waitpid(pid, NULL, NULL);
         printf("DAD\n");
     }
