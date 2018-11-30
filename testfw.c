@@ -9,6 +9,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <link.h>
 
 #include "testfw.h"
 
@@ -145,24 +146,25 @@ struct test_t *testfw_register_symb(struct testfw_t *fw, char *suite, char *name
         exit(EXIT_FAILURE);
     }
 
-    int size = strlen(name) + strlen(suite) + strlen(fw->separator)+1;
+    int size = strlen(name) + strlen(suite) + strlen(fw->separator) + 1;
     //int size = 100;
-    char *funcname = (char *)malloc(size);        // final function name with size of name+_+suite
-    strcpy(funcname, suite);                      //funcname = suite
-    strcat(funcname, fw->separator);              //funcname = suite_
-    strcat(funcname, name);                       //funcame = suite_name
+    char *funcname = (char *)malloc(size); // final function name with size of name+_+suite
+    strcpy(funcname, suite);               //funcname = suite
+    strcat(funcname, fw->separator);       //funcname = suite_
+    strcat(funcname, name);                //funcame = suite_name
 
     void *handle = dlopen(NULL, RTLD_LAZY); // open program exec
 
-    if (!handle) {
+    if (!handle)
+    {
         fprintf(stderr, "%s\n", dlerror());
         exit(EXIT_FAILURE);
     }
-    dlerror();    /* Clear any existing error */
+    dlerror(); /* Clear any existing error */
 
     testfw_func_t func = (testfw_func_t)dlsym(handle, funcname);
-    
-    dlclose(handle); 
+
+    dlclose(handle);
     if (func == NULL)
     {
         fprintf(stderr, "func pointer is NULL, impossible to register\n");
@@ -264,10 +266,12 @@ int testfw_run_all(struct testfw_t *fw, int argc, char *argv[], enum testfw_mode
                 printf("LAUNCHING FUNCTION\n");
 
                 int status = 0;
-                //status = (int) fw->tests[i].func(argc, argv);
+                testfw_func_t functionPtr = fw->tests[i].func;
 
+                Dl_info d;
+                dladdr(functionPtr, &d);
+                printf("%s\n", d.dli_sname);
 
-                testfw_func_t *functionPtr = &fw->tests[i].func;
                 status = (*functionPtr)(argc, argv);
 
                 printf("DONE\n");
@@ -290,8 +294,8 @@ int testfw_run_all(struct testfw_t *fw, int argc, char *argv[], enum testfw_mode
                 }
             }
         }
-        wait(NULL);
-        //waitpid(pid, NULL, NULL);
+       // wait(NULL);
+        waitpid(pid, NULL, NULL);
         printf("DAD\n");
     }
     else if (mode == TESTFW_NOFORK)
