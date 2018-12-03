@@ -1,5 +1,7 @@
 #define _GNU_SOURCE
 #define TEST_SIZE 100
+#define NSIGNORT 32
+
 #include <stdbool.h>
 #include <stdio.h>
 #include <dlfcn.h>
@@ -235,12 +237,23 @@ int testfw_register_suite(struct testfw_t *fw, char *suite)
 /* ********** RUN TEST ********** */
 
 jmp_buf buf;
+int sig_caught = -1;
+enum test_statut_t test_statut = DEFAULT;
 
 void expire(int sig)
 {
     printf("Time expired\n");
+                        test_statut = TIMEOUT;
+
     if (sig == SIGALRM)
         siglongjmp(buf, 1);
+}
+void handler(int sig)
+{
+    printf("Signal received : %s\n", strsignal(sig));
+    sig_caught = sig;
+    test_statut = KILLED;
+    siglongjmp(buf, 1);
 }
 
 int testfw_run_all(struct testfw_t *fw, int argc, char *argv[], enum testfw_mode_t mode)
@@ -256,14 +269,9 @@ int testfw_run_all(struct testfw_t *fw, int argc, char *argv[], enum testfw_mode
         exit(EXIT_FAILURE);
     }
     /*
-* KILLED: killed by any signal (SIGSEGV, SIGABRT, ...)
-* TIMEOUT: after a time limit, return an exit status of 124 (following the convention used in *timeout* command)
-*/
-
-    /*
-  * *timeout* : la commande est interrompue si elle dépasse une limite de temps (et elle renvoie le status 124) ; 
   * *logfile* : la sortie standard du test (et sa sortie d'erreur) sont redirigées dans un fichier ;
-  * *cmd* : la sortie standard du test (et sa sortie d'erreur) sont redirigés sur l'entrée standard d'une commande shell grâce aux fonctions popen/pclose (cf. man).*/
+  * *cmd* : la sortie standard du test (et sa sortie d'erreur) sont redirigés sur l'entrée standard d'une commande shell grâce aux fonctions popen/pclose (cf. man).
+  * */
 
     if (mode == TESTFW_FORKS)
     {
@@ -274,7 +282,6 @@ int testfw_run_all(struct testfw_t *fw, int argc, char *argv[], enum testfw_mode
             for (int i = 0; i < fw->tests_length; i++)
             {
                 int status = 0;
-                enum test_statut_t test_statut = DEFAULT;
 
                 testfw_func_t functionPtr = fw->tests[i].func;
 
@@ -283,11 +290,23 @@ int testfw_run_all(struct testfw_t *fw, int argc, char *argv[], enum testfw_mode
                 printf("%s\n", d.dli_sname);
                 struct timeval start, end;
 
+                /* ********** SIGNALS**** */
+                struct sigaction act;
+                act.sa_flags = 0;
+                act.sa_handler = handler;
+                sigemptyset(&act.sa_mask);
+                for (int i = 1; i < NSIGNORT; i++)
+                {
+                    sigaction(i, &act, NULL);
+                }
+
+                /* ********** ALARM  ********** */
                 struct sigaction s;
                 s.sa_flags = 0;
                 s.sa_handler = expire;
                 sigemptyset(&s.sa_mask);
                 sigaction(SIGALRM, &s, NULL);
+
                 if (sigsetjmp(buf, 1) == 0)
                 {
                     alarm(fw->timeout);
@@ -295,24 +314,23 @@ int testfw_run_all(struct testfw_t *fw, int argc, char *argv[], enum testfw_mode
                     status = (functionPtr)(argc, argv);
                     alarm(0);
                     gettimeofday(&end, NULL);
-                                    if (status == 0)
-                    test_statut = SUCCESS;
-                else
-                    test_statut = FAILURE;
+                    if (status == 0)
+                        test_statut = SUCCESS;
+                    else
+                        test_statut = FAILURE;
+                    printf("no signal received\n");
                 }
-                else{
+                else
+                {
                     printf("I'm out !\n");
-                    test_statut = TIMEOUT;
-
+                    gettimeofday(&end, NULL);
                 }
 
                 double duration = (end.tv_sec - start.tv_sec) * 1000LL + (end.tv_usec - start.tv_usec) / 1000;
 
-                char *sig_name = "null";
-                printf("DONE\n");
-
-
-
+                printf("DONE test statut : %d\n", test_statut);
+                
+                /* ********** DISPLAY  ********** */
                 if (!fw->silent)
                 {
                     switch (test_statut)
@@ -325,11 +343,11 @@ int testfw_run_all(struct testfw_t *fw, int argc, char *argv[], enum testfw_mode
                         nb_tests_failed++;
                         break;
                     case TIMEOUT:
-                        printf("[TIMEOUT] run test \"%s.%s\" in %f ms (status %d)\n", fw->tests[i].suite, fw->tests[i].name, duration, status);
+                        printf("[TIMEOUT] run test \"%s.%s\" in %f ms (status 124)\n", fw->tests[i].suite, fw->tests[i].name, duration);
                         nb_tests_failed++;
                         break;
                     case KILLED:
-                        printf("[KILLED] run test \"%s.%s\" in %f ms (signal \"%s\")\n", fw->tests[i].suite, fw->tests[i].name, duration, sig_name);
+                        printf("[KILLED] run test \"%s.%s\" in %f ms (signal \"%s\")\n", fw->tests[i].suite, fw->tests[i].name, duration, strsignal(sig_caught));
                         nb_tests_failed++;
                         break;
                     default:
@@ -343,7 +361,7 @@ int testfw_run_all(struct testfw_t *fw, int argc, char *argv[], enum testfw_mode
         else
         {
             //wait(NULL);
-            waitpid(pid, NULL, NULL);
+            waitpid(pid, NULL, NULL); // IMPROVE
             printf("DAD\n");
         }
     }
