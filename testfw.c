@@ -240,15 +240,14 @@ jmp_buf buf;
 int sig_caught = -1;
 enum test_statut_t test_statut = DEFAULT;
 
-void expire(int sig)
+static void expire(int sig)
 {
     printf("Time expired\n");
-                        test_statut = TIMEOUT;
-
-    if (sig == SIGALRM)
-        siglongjmp(buf, 1);
+    test_statut = TIMEOUT;
+    siglongjmp(buf, 1);
 }
-void handler(int sig)
+
+static void handler(int sig)
 {
     printf("Signal received : %s\n", strsignal(sig));
     sig_caught = sig;
@@ -256,13 +255,85 @@ void handler(int sig)
     siglongjmp(buf, 1);
 }
 
-int testfw_run_all(struct testfw_t *fw, int argc, char *argv[], enum testfw_mode_t mode)
+static void testfw_run_display(struct testfw_t *fw, double duration, char * suite, char * name, int status)
 {
-    printf("RUN_ALL\n");
 
+    switch (test_statut)
+    {
+    case SUCCESS:
+        printf("[SUCCESS] run test \"%s.%s\" in %f ms (status %d)\n", suite, name, duration, status);
+        break;
+    case FAILURE:
+        printf("[FAILURE] run test \"%s.%s\" in %f ms (status %d)\n", suite, name, duration, status);
+        break;
+    case TIMEOUT:
+        printf("[TIMEOUT] run test \"%s.%s\" in %f ms (status 124)\n", suite, name, duration);
+        break;
+    case KILLED:
+        printf("[KILLED] run test \"%s.%s\" in %f ms (signal \"%s\")\n", suite, name, duration, strsignal(sig_caught));
+        break;
+    default:
+        fprintf(stderr, "Unknown status return by a function\n");
+        exit(EXIT_FAILURE);
+        break;
+    }
+}
+static int testfw_sequential_run(struct testfw_t *fw, int argc, char *argv[])
+{
     int nb_tests_failed = 0;
 
-    // check pointers
+    for (int i = 0; i < fw->tests_length; i++)
+    {
+        int status = 0;
+        struct timeval start, end;
+        testfw_func_t functionPtr = fw->tests[i].func;
+
+        struct sigaction act;
+        act.sa_flags = 0;
+        act.sa_handler = handler;
+        sigemptyset(&act.sa_mask);
+        for (int i = 1; i < NSIGNORT; i++)
+        {
+            sigaction(i, &act, NULL);
+        }
+
+        struct sigaction s;
+        s.sa_flags = 0;
+        s.sa_handler = expire;
+        sigemptyset(&s.sa_mask);
+        sigaction(SIGALRM, &s, NULL);
+
+        if (sigsetjmp(buf, 1) == 0)
+        {
+            alarm(fw->timeout);
+            gettimeofday(&start, NULL);
+            status = (functionPtr)(argc, argv);
+            alarm(0);
+            gettimeofday(&end, NULL);
+            if (status == 0)
+                test_statut = SUCCESS;
+            else
+            {
+                test_statut = FAILURE;
+                nb_tests_failed++;
+            }
+        }
+        else
+        {
+            gettimeofday(&end, NULL);
+            nb_tests_failed++;
+        }
+
+        double duration = (end.tv_sec - start.tv_sec) * 1000LL + (end.tv_usec - start.tv_usec) / 1000;
+
+        if (!fw->silent)
+            testfw_run_display(fw, duration,fw->tests[i].suite, fw->tests[i].name, status);
+    }
+    return nb_tests_failed;
+}
+int testfw_run_all(struct testfw_t *fw, int argc, char *argv[], enum testfw_mode_t mode)
+{
+
     if (fw == NULL)
     {
         fprintf(stderr, "testfw_t pointer is NULL, impossible to register a suite in it\n");
@@ -272,107 +343,38 @@ int testfw_run_all(struct testfw_t *fw, int argc, char *argv[], enum testfw_mode
   * *logfile* : la sortie standard du test (et sa sortie d'erreur) sont redirigées dans un fichier ;
   * *cmd* : la sortie standard du test (et sa sortie d'erreur) sont redirigés sur l'entrée standard d'une commande shell grâce aux fonctions popen/pclose (cf. man).
   * */
-
-    if (mode == TESTFW_FORKS)
+    int wstatus;
+    pid_t pid;
+    switch (mode)
     {
-        pid_t pid = fork();
+    case TESTFW_FORKS:
+        pid = fork();
         if (pid == 0)
         {
             printf("SON\n");
-            for (int i = 0; i < fw->tests_length; i++)
-            {
-                int status = 0;
-
-                testfw_func_t functionPtr = fw->tests[i].func;
-
-                Dl_info d;
-                dladdr(functionPtr, &d);
-                printf("%s\n", d.dli_sname);
-                struct timeval start, end;
-
-                /* ********** SIGNALS**** */
-                struct sigaction act;
-                act.sa_flags = 0;
-                act.sa_handler = handler;
-                sigemptyset(&act.sa_mask);
-                for (int i = 1; i < NSIGNORT; i++)
-                {
-                    sigaction(i, &act, NULL);
-                }
-
-                /* ********** ALARM  ********** */
-                struct sigaction s;
-                s.sa_flags = 0;
-                s.sa_handler = expire;
-                sigemptyset(&s.sa_mask);
-                sigaction(SIGALRM, &s, NULL);
-
-                if (sigsetjmp(buf, 1) == 0)
-                {
-                    alarm(fw->timeout);
-                    gettimeofday(&start, NULL);
-                    status = (functionPtr)(argc, argv);
-                    alarm(0);
-                    gettimeofday(&end, NULL);
-                    if (status == 0)
-                        test_statut = SUCCESS;
-                    else
-                        test_statut = FAILURE;
-                    printf("no signal received\n");
-                }
-                else
-                {
-                    printf("I'm out !\n");
-                    gettimeofday(&end, NULL);
-                }
-
-                double duration = (end.tv_sec - start.tv_sec) * 1000LL + (end.tv_usec - start.tv_usec) / 1000;
-
-                printf("DONE test statut : %d\n", test_statut);
-                
-                /* ********** DISPLAY  ********** */
-                if (!fw->silent)
-                {
-                    switch (test_statut)
-                    {
-                    case SUCCESS:
-                        printf("[SUCCESS] run test \"%s.%s\" in %f ms (status %d)\n", fw->tests[i].suite, fw->tests[i].name, duration, status);
-                        break;
-                    case FAILURE:
-                        printf("[FAILURE] run test \"%s.%s\" in %f ms (status %d)\n", fw->tests[i].suite, fw->tests[i].name, duration, status);
-                        nb_tests_failed++;
-                        break;
-                    case TIMEOUT:
-                        printf("[TIMEOUT] run test \"%s.%s\" in %f ms (status 124)\n", fw->tests[i].suite, fw->tests[i].name, duration);
-                        nb_tests_failed++;
-                        break;
-                    case KILLED:
-                        printf("[KILLED] run test \"%s.%s\" in %f ms (signal \"%s\")\n", fw->tests[i].suite, fw->tests[i].name, duration, strsignal(sig_caught));
-                        nb_tests_failed++;
-                        break;
-                    default:
-                        fprintf(stderr, "Unknown status\n");
-                        exit(EXIT_FAILURE);
-                        break;
-                    }
-                }
-            }
+            testfw_sequential_run(fw, argc, argv);
+            exit(EXIT_SUCCESS);
         }
         else
         {
-            //wait(NULL);
-            waitpid(pid, NULL, NULL); // IMPROVE
+            waitpid(pid, &wstatus, NULL);
             printf("DAD\n");
+            printf("%d\n", wstatus);
+            if (wstatus != 0)
+                fprintf(stderr, "Error in the fork\n");
         }
-    }
-    else if (mode == TESTFW_NOFORK)
-    {
-        //same thing
-    }
-    else if (mode == TESTFW_FORKP)
-    {
-        //parallel fork
+
+        break;
+    case TESTFW_NOFORK:
+        return testfw_sequential_run(fw, argc, argv);
+        break;
+    case TESTFW_FORKP:
+        //parallel fork as a BONUS
+        break;
+    default:
+        fprintf(stderr, "Unknown mode, impossible to run\n");
+        exit(EXIT_FAILURE);
     }
 
-    return nb_tests_failed;
+    return -1;
 }
