@@ -8,9 +8,10 @@
 #include <signal.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <sys/time.h>
 #include <unistd.h>
-#include <link.h>
-
+#include <setjmp.h>
+//check non-necessary includes
 #include "testfw.h"
 
 /* ********** STRUCTURES ********** */
@@ -26,6 +27,15 @@ struct testfw_t
     char *separator;
     struct test_t tests[TEST_SIZE];
     int tests_length;
+};
+
+enum test_statut_t
+{
+    SUCCESS,
+    FAILURE,
+    TIMEOUT,
+    KILLED,
+    DEFAULT
 };
 
 /* ********** FRAMEWORK ********** */
@@ -224,10 +234,19 @@ int testfw_register_suite(struct testfw_t *fw, char *suite)
 
 /* ********** RUN TEST ********** */
 
+jmp_buf buf;
+
+void expire(int sig)
+{
+    printf("Time expired\n");
+    if (sig == SIGALRM)
+        siglongjmp(buf, 1);
+}
+
 int testfw_run_all(struct testfw_t *fw, int argc, char *argv[], enum testfw_mode_t mode)
 {
     printf("RUN_ALL\n");
-    char *message = (char *)malloc(100);
+
     int nb_tests_failed = 0;
 
     // check pointers
@@ -236,15 +255,7 @@ int testfw_run_all(struct testfw_t *fw, int argc, char *argv[], enum testfw_mode
         fprintf(stderr, "testfw_t pointer is NULL, impossible to register a suite in it\n");
         exit(EXIT_FAILURE);
     }
-    /*Cette fonction retourne le nombre de tests qui échouent ou zéro en cas de succès. En outre, elle affiche sur sa sortie standard (sauf en mode silent) le résultat des tests avec le format suivant, illustré par quelques tests fournis dans sample.c :
-
-[SUCCESS] run test "test.hello" in 0.47 ms (status 0)
-[TIMEOUT] run test "test.infiniteloop" in 2000.19 ms (status 124)
-[KILLED] run test "test.segfault" in 0.14 ms (signal "Segmentation fault")
-[FAILURE] run test "test.failure" in 0.40 ms (status 1)
-
-
-* FAILURE: return EXIT_FAILURE or 1 (or any value different of EXIT_SUCCESS)
+    /*
 * KILLED: killed by any signal (SIGSEGV, SIGABRT, ...)
 * TIMEOUT: after a time limit, return an exit status of 124 (following the convention used in *timeout* command)
 */
@@ -254,7 +265,6 @@ int testfw_run_all(struct testfw_t *fw, int argc, char *argv[], enum testfw_mode
   * *logfile* : la sortie standard du test (et sa sortie d'erreur) sont redirigées dans un fichier ;
   * *cmd* : la sortie standard du test (et sa sortie d'erreur) sont redirigés sur l'entrée standard d'une commande shell grâce aux fonctions popen/pclose (cf. man).*/
 
-    //https://stackoverflow.com/questions/840501/how-do-function-pointers-in-c-work
     if (mode == TESTFW_FORKS)
     {
         pid_t pid = fork();
@@ -263,46 +273,88 @@ int testfw_run_all(struct testfw_t *fw, int argc, char *argv[], enum testfw_mode
             printf("SON\n");
             for (int i = 0; i < fw->tests_length; i++)
             {
-                printf("LAUNCHING FUNCTION\n");
-
                 int status = 0;
+                enum test_statut_t test_statut = DEFAULT;
+
                 testfw_func_t functionPtr = fw->tests[i].func;
 
                 Dl_info d;
                 dladdr(functionPtr, &d);
                 printf("%s\n", d.dli_sname);
+                struct timeval start, end;
 
-                status = (*functionPtr)(argc, argv);
+                struct sigaction s;
+                s.sa_flags = 0;
+                s.sa_handler = expire;
+                sigemptyset(&s.sa_mask);
+                sigaction(SIGALRM, &s, NULL);
+                if (sigsetjmp(buf, 1) == 0)
+                {
+                    alarm(fw->timeout);
+                    gettimeofday(&start, NULL);
+                    status = (functionPtr)(argc, argv);
+                    alarm(0);
+                    gettimeofday(&end, NULL);
+                                    if (status == 0)
+                    test_statut = SUCCESS;
+                else
+                    test_statut = FAILURE;
+                }
+                else{
+                    printf("I'm out !\n");
+                    test_statut = TIMEOUT;
 
+                }
+
+                double duration = (end.tv_sec - start.tv_sec) * 1000LL + (end.tv_usec - start.tv_usec) / 1000;
+
+                char *sig_name = "null";
                 printf("DONE\n");
+
+
 
                 if (!fw->silent)
                 {
-                    if (status == EXIT_SUCCESS)
-                        message = "SUCCESS";
-                    else
+                    switch (test_statut)
                     {
-                        if (status == EXIT_FAILURE) // AND OTHER VALUES
-                            message = "FAILURE";
-                        else
-                            message = "ELSE";
-
+                    case SUCCESS:
+                        printf("[SUCCESS] run test \"%s.%s\" in %f ms (status %d)\n", fw->tests[i].suite, fw->tests[i].name, duration, status);
+                        break;
+                    case FAILURE:
+                        printf("[FAILURE] run test \"%s.%s\" in %f ms (status %d)\n", fw->tests[i].suite, fw->tests[i].name, duration, status);
                         nb_tests_failed++;
+                        break;
+                    case TIMEOUT:
+                        printf("[TIMEOUT] run test \"%s.%s\" in %f ms (status %d)\n", fw->tests[i].suite, fw->tests[i].name, duration, status);
+                        nb_tests_failed++;
+                        break;
+                    case KILLED:
+                        printf("[KILLED] run test \"%s.%s\" in %f ms (signal \"%s\")\n", fw->tests[i].suite, fw->tests[i].name, duration, sig_name);
+                        nb_tests_failed++;
+                        break;
+                    default:
+                        fprintf(stderr, "Unknown status\n");
+                        exit(EXIT_FAILURE);
+                        break;
                     }
-
-                    printf("[%s] run test \"%s.%s\" in %d ms (status %d)\n", message, fw->tests[i].suite, fw->tests[i].name, -1, status);
                 }
             }
         }
-       // wait(NULL);
-        waitpid(pid, NULL, NULL);
-        printf("DAD\n");
+        else
+        {
+            //wait(NULL);
+            waitpid(pid, NULL, NULL);
+            printf("DAD\n");
+        }
     }
     else if (mode == TESTFW_NOFORK)
     {
         //same thing
     }
-    free(message);
+    else if (mode == TESTFW_FORKP)
+    {
+        //parallel fork
+    }
 
     return nb_tests_failed;
 }
