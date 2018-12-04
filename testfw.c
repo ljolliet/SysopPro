@@ -202,8 +202,8 @@ int testfw_register_suite(struct testfw_t *fw, char *suite)
     int size = 0;
     size_t len = 0;
 
-    char *cmd = (char *)malloc(100);            // CHECK SIZE
-    strcpy(cmd, "nm ");                         // cmd = nm
+    char *cmd = (char *)malloc(200);            // CHECK SIZE
+    strcpy(cmd, "nm --defined-only ");          // cmd = nm
     strcat(cmd, fw->program);                   // cmd = nm <program>
     strcat(cmd, " | cut -d ' ' -f 3 | grep ^"); // ...
     strcat(cmd, suite);
@@ -238,27 +238,25 @@ int testfw_register_suite(struct testfw_t *fw, char *suite)
 
 jmp_buf buf;
 int sig_caught = -1;
-enum test_statut_t test_statut = DEFAULT;
+enum test_statut_t statut_test = DEFAULT;
 
 static void expire(int sig)
 {
-    printf("Time expired\n");
-    test_statut = TIMEOUT;
+    statut_test = TIMEOUT;
     siglongjmp(buf, 1);
 }
 
 static void handler(int sig)
 {
-    printf("Signal received : %s\n", strsignal(sig));
     sig_caught = sig;
-    test_statut = KILLED;
+    statut_test = KILLED;
     siglongjmp(buf, 1);
 }
 
-static void testfw_run_display(struct testfw_t *fw, double duration, char * suite, char * name, int status)
+static void testfw_run_display(struct testfw_t *fw, double duration, char *suite, char *name, int status)
 {
 
-    switch (test_statut)
+    switch (statut_test)
     {
     case SUCCESS:
         printf("[SUCCESS] run test \"%s.%s\" in %f ms (status %d)\n", suite, name, duration, status);
@@ -311,10 +309,10 @@ static int testfw_sequential_run(struct testfw_t *fw, int argc, char *argv[])
             alarm(0);
             gettimeofday(&end, NULL);
             if (status == 0)
-                test_statut = SUCCESS;
+                statut_test = SUCCESS;
             else
             {
-                test_statut = FAILURE;
+                statut_test = FAILURE;
                 nb_tests_failed++;
             }
         }
@@ -327,7 +325,7 @@ static int testfw_sequential_run(struct testfw_t *fw, int argc, char *argv[])
         double duration = (end.tv_sec - start.tv_sec) * 1000LL + (end.tv_usec - start.tv_usec) / 1000;
 
         if (!fw->silent)
-            testfw_run_display(fw, duration,fw->tests[i].suite, fw->tests[i].name, status);
+            testfw_run_display(fw, duration, fw->tests[i].suite, fw->tests[i].name, status);
     }
     return nb_tests_failed;
 }
@@ -345,6 +343,9 @@ int testfw_run_all(struct testfw_t *fw, int argc, char *argv[], enum testfw_mode
   * */
     int wstatus;
     pid_t pid;
+    int p[2];
+    pipe(p);
+    int nb_tests_failed = -1;
     switch (mode)
     {
     case TESTFW_FORKS:
@@ -352,15 +353,19 @@ int testfw_run_all(struct testfw_t *fw, int argc, char *argv[], enum testfw_mode
         if (pid == 0)
         {
             printf("SON\n");
-            testfw_sequential_run(fw, argc, argv);
+            nb_tests_failed = testfw_sequential_run(fw, argc, argv);
+            close(p[0]);
+            write(p[1], &nb_tests_failed, sizeof(nb_tests_failed));
+            close(p[1]);
             exit(EXIT_SUCCESS);
         }
         else
         {
             waitpid(pid, &wstatus, NULL);
-            printf("DAD\n");
-            printf("%d\n", wstatus);
-            if (wstatus != 0)
+            close(p[1]);
+            read(p[0], &nb_tests_failed, sizeof(nb_tests_failed));
+            close(p[0]);
+            if (wstatus != EXIT_SUCCESS)
                 fprintf(stderr, "Error in the fork\n");
         }
 
@@ -376,5 +381,5 @@ int testfw_run_all(struct testfw_t *fw, int argc, char *argv[], enum testfw_mode
         exit(EXIT_FAILURE);
     }
 
-    return -1;
+    return nb_tests_failed;
 }
