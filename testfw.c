@@ -337,7 +337,7 @@ static struct test_statement_t testfw_run_test(struct test_t *test, int argc, ch
         gettimeofday(&end, NULL);
         nb_tests_failed++;
     }
-    long d = (end.tv_usec - start.tv_usec) / (1000.0*1000.0) + (end.tv_sec - start.tv_sec);
+    long d = (end.tv_usec - start.tv_usec) / (1000.0 * 1000.0) + (end.tv_sec - start.tv_sec);
     double duration = (double)d;
     statement_test.duration = duration;
     statement_test.returned_statement = status;
@@ -359,8 +359,8 @@ int testfw_run_all(struct testfw_t *fw, int argc, char *argv[], enum testfw_mode
         exit(EXIT_FAILURE);
     }
     struct test_statement_t statement_test;
-        int nb_tests_failed = 0;
-    pid_t pid,wstatus;
+    int nb_tests_failed = 0;
+    pid_t pid, wstatus;
     int p[2];
     pipe(p);
 
@@ -380,8 +380,47 @@ int testfw_run_all(struct testfw_t *fw, int argc, char *argv[], enum testfw_mode
 
             for (int i = 0; i < fw->tests_length; i++)
             {
-                statement_test = testfw_run_test(&fw->tests[i], argc, argv, fw->timeout, &nb_tests_failed);
-                write(p[1], &statement_test, sizeof(statement_test));
+                printf("run a test %s\n", fw->cmd);
+
+                if (fw->cmd != NULL)
+                {
+                    printf("cmd NULL\n");
+
+                    statement_test = testfw_run_test(&fw->tests[i], argc, argv, fw->timeout, &nb_tests_failed);
+                    write(p[1], &statement_test, sizeof(statement_test));
+                }
+                else
+                {
+                    printf("cmd != NULL\n");
+
+                    int intern_p[2];
+                    pipe(intern_p);
+                    char *result = NULL;
+                    size_t len = 0;
+                    char *cmd = "cat -n";
+                    printf("%s\n", fw->cmd);
+                    if (fork() == 0)
+                    {
+                        close(intern_p[0]);
+                        dup2(intern_p[1], STDOUT_FILENO);
+                        close(intern_p[1]);
+                        statement_test = testfw_run_test(&fw->tests[i], argc, argv, fw->timeout, &nb_tests_failed);
+                        write(p[1], &statement_test, sizeof(statement_test)); // NOT THE GOAL OF THE WHOLE
+                        exit(EXIT_SUCCESS);
+                    }
+                    else
+                    {
+                        close(intern_p[1]);
+                        dup2(intern_p[0], STDIN_FILENO);
+                        close(intern_p[0]);
+                        FILE *fp = popen(cmd, "r"); // change cmd
+                        while (getline(&result, &len, fp) != -1)
+                        {
+                            printf("%s", result);
+                        }
+                        fclose(fp);
+                    }
+                }
             }
             close(p[1]);
             exit(EXIT_SUCCESS);
