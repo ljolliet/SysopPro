@@ -2,23 +2,21 @@
 #define TEST_SIZE 100
 #define NSIGNORT 32
 
-#include <stdbool.h>
 #include <stdio.h>
-#include <dlfcn.h>
-#include <string.h>
 #include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
 #include <signal.h>
+#include <dlfcn.h>
+#include <fcntl.h>
+#include <setjmp.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/time.h>
-#include <unistd.h>
-#include <setjmp.h>
-#include <fcntl.h>
 
-//check non-necessary includes
 #include "testfw.h"
 
-/* ********** STRUCTURES ********** */
+/* ********** STRUCTURES AND ENUMS ********** */
 
 struct testfw_t
 {
@@ -33,8 +31,7 @@ struct testfw_t
     int tests_length;
 };
 
-
-enum test_statut_t
+enum test_status_t
 {
     SUCCESS,
     FAILURE,
@@ -45,12 +42,11 @@ enum test_statut_t
 
 struct test_statement_t
 {
-    enum test_statut_t statut_test;
+    enum test_status_t status_test;
     int returned_statement;
     double duration;
     int signal_caught;
 };
-
 
 /* ********** FRAMEWORK ********** */
 
@@ -248,41 +244,48 @@ int testfw_register_suite(struct testfw_t *fw, char *suite)
 
 /* ********** RUN TEST ********** */
 
-jmp_buf buf;
-int sig_caught = -1;
-enum test_statut_t statut_test = DEFAULT;
+static jmp_buf buf;
+static int sig_caught = -1;
+static enum test_status_t status_test = DEFAULT;
 
 static void expire(int sig)
 {
-    statut_test = TIMEOUT;
+    status_test = TIMEOUT;
     siglongjmp(buf, 1);
 }
 
 static void handler(int sig)
 {
     sig_caught = sig;
-    statut_test = KILLED;
+    status_test = KILLED;
     siglongjmp(buf, 1);
 }
 
-static int testfw_run_display(struct testfw_t *fw, struct test_statement_t statement_test, char * suite, char * name, int nb_test_failed)
+/**
+ * @brief 
+ *
+ * @param
+ * @param 
+ * @return 
+ */
+static int testfw_run_display(struct testfw_t *fw, struct test_statement_t statement_test, char *suite, char *name, int nb_test_failed)
 {
 
-    switch (statement_test.statut_test)
+    switch (statement_test.status_test)
     {
     case SUCCESS:
-        printf("[SUCCESS] run test \"%s.%s\" in %f ms (status %d)\n", suite, name, statement_test.duration, statement_test.returned_statement);
+        printf("[SUCCESS] run test \"%s.%s\" in %f s (status %d)\n", suite, name, statement_test.duration, statement_test.returned_statement);
         break;
     case FAILURE:
-        printf("[FAILURE] run test \"%s.%s\" in %f ms (status %d)\n", suite, name, statement_test.duration, statement_test.returned_statement);
+        printf("[FAILURE] run test \"%s.%s\" in %f s (status %d)\n", suite, name, statement_test.duration, statement_test.returned_statement);
         nb_test_failed++;
         break;
     case TIMEOUT:
-        printf("[TIMEOUT] run test \"%s.%s\" in %f ms (status 124)\n", suite, name, statement_test.duration);
+        printf("[TIMEOUT] run test \"%s.%s\" in %f s (status 124)\n", suite, name, statement_test.duration);
         nb_test_failed++;
         break;
     case KILLED:
-        printf("[KILLED] run test \"%s.%s\" in %f ms (signal \"%s\")\n", suite, name, statement_test.duration,  strsignal(statement_test.signal_caught));
+        printf("[KILLED] run test \"%s.%s\" in %f s (signal \"%s\")\n", suite, name, statement_test.duration, strsignal(statement_test.signal_caught));
         nb_test_failed++;
         break;
     default:
@@ -293,61 +296,60 @@ static int testfw_run_display(struct testfw_t *fw, struct test_statement_t state
     return nb_test_failed;
 }
 
-static int testfw_sequential_run(struct testfw_t *fw, int argc, char *argv[])
+static struct test_statement_t testfw_run_test(struct test_t *test, int argc, char *argv[], int timeout, int *nb_tests_failed)
 {
-    int nb_tests_failed = 0; 
+    struct test_statement_t statement_test;
+    struct timeval start, end;
+    int status = 0;
+    testfw_func_t functionPtr = test->func;
 
-    for (int i = 0; i < fw->tests_length; i++)
+    struct sigaction act; // rename
+    act.sa_flags = 0;
+    act.sa_handler = handler;
+    sigemptyset(&act.sa_mask);
+    for (int i = 1; i < NSIGNORT; i++)
+        sigaction(i, &act, NULL);
+
+    struct sigaction s; // rename
+    s.sa_flags = 0;
+    s.sa_handler = expire;
+    sigemptyset(&s.sa_mask);
+    sigaction(SIGALRM, &s, NULL);
+
+    if (sigsetjmp(buf, 1) == 0)
     {
-        int status = 0;
-        struct timeval start, end;
-        testfw_func_t functionPtr = fw->tests[i].func;
+        alarm(timeout);
+        gettimeofday(&start, NULL);
+        status = (functionPtr)(argc, argv);
+        alarm(0);
+        gettimeofday(&end, NULL);
 
-        struct sigaction act;
-        act.sa_flags = 0;
-        act.sa_handler = handler;
-        sigemptyset(&act.sa_mask);
-
-        for (int i = 1; i < NSIGNORT; i++)
-        {
-            sigaction(i, &act, NULL);
-        }
-
-        struct sigaction s;
-        s.sa_flags = 0;
-        s.sa_handler = expire;
-        sigemptyset(&s.sa_mask);
-        sigaction(SIGALRM, &s, NULL);
-
-        if (sigsetjmp(buf, 1) == 0)
-        {
-            alarm(fw->timeout);
-            gettimeofday(&start, NULL);
-            status = (functionPtr)(argc, argv);
-            alarm(0);
-            gettimeofday(&end, NULL);
-            if (status == 0)
-                statut_test = SUCCESS;
-            else
-            {
-                statut_test = FAILURE;
-                nb_tests_failed++;
-            }
-        }
+        if (status == 0)
+            status_test = SUCCESS;
         else
         {
-            gettimeofday(&end, NULL);
+            status_test = FAILURE;
             nb_tests_failed++;
         }
-
-        double duration = (end.tv_sec - start.tv_sec) * 1000LL + (end.tv_usec - start.tv_usec) / 1000;
-
-        if (!fw->silent){}
-           // testfw_run_display(fw, duration, fw->tests[i].suite, fw->tests[i].name, status);
     }
-    return nb_tests_failed;
+    else
+    {
+        gettimeofday(&end, NULL);
+        nb_tests_failed++;
+    }
+    long d = (end.tv_usec - start.tv_usec) / (1000.0*1000.0) + (end.tv_sec - start.tv_sec);
+    double duration = (double)d;
+    statement_test.duration = duration;
+    statement_test.returned_statement = status;
+    statement_test.signal_caught = sig_caught;
+    statement_test.status_test = status_test;
+
+    return statement_test;
 }
 
+/*
+  * *cmd* : la sortie standard du test (et sa sortie d'erreur) sont redirigés sur l'entrée standard d'une commande shell grâce aux fonctions popen/pclose (cf. man).
+  * */
 int testfw_run_all(struct testfw_t *fw, int argc, char *argv[], enum testfw_mode_t mode)
 {
 
@@ -356,79 +358,29 @@ int testfw_run_all(struct testfw_t *fw, int argc, char *argv[], enum testfw_mode
         fprintf(stderr, "testfw_t pointer is NULL, impossible to register a suite in it\n");
         exit(EXIT_FAILURE);
     }
-    /*
-  * *logfile* : la sortie standard du test (et sa sortie d'erreur) sont redirigées dans un fichier ;
-  * *cmd* : la sortie standard du test (et sa sortie d'erreur) sont redirigés sur l'entrée standard d'une commande shell grâce aux fonctions popen/pclose (cf. man).
-  * */
-    int wstatus;
-    pid_t pid;
+    struct test_statement_t statement_test;
+        int nb_tests_failed = 0;
+    pid_t pid,wstatus;
     int p[2];
     pipe(p);
-    struct test_statement_t statement_test;
 
-    int nb_tests_failed = 0;
     switch (mode)
     {
     case TESTFW_FORKS:
         pid = fork();
         if (pid == 0)
         {
-            //  nb_tests_failed = testfw_sequential_run(fw, argc, argv);
-            struct timeval start, end;
             close(p[0]);
-            int fd = open(fw->logfile, O_WRONLY | O_CREAT, 0644 ); //check logfile name
-            dup2(fd, STDOUT_FILENO);
-            dup2(fd, STDERR_FILENO);
-
+            if (fw->logfile != NULL)
+            {
+                int fd = open(fw->logfile, O_WRONLY | O_CREAT, 0644);
+                dup2(fd, STDOUT_FILENO);
+                dup2(fd, STDERR_FILENO);
+            }
 
             for (int i = 0; i < fw->tests_length; i++)
             {
-                int status = 0;
-                testfw_func_t functionPtr = fw->tests[i].func;
-
-                struct sigaction act;
-                act.sa_flags = 0;
-                act.sa_handler = handler;
-                sigemptyset(&act.sa_mask);
-                for (int i = 1; i < NSIGNORT; i++)
-                {
-                    sigaction(i, &act, NULL);
-                }
-
-                struct sigaction s;
-                s.sa_flags = 0;
-                s.sa_handler = expire;
-                sigemptyset(&s.sa_mask);
-                sigaction(SIGALRM, &s, NULL);
-
-                if (sigsetjmp(buf, 1) == 0)
-                {
-                    alarm(fw->timeout);
-                    gettimeofday(&start, NULL);
-                    status = (functionPtr)(argc, argv);
-                    alarm(0);
-                    gettimeofday(&end, NULL);
-
-                    if (status == 0)
-                        statut_test = SUCCESS;
-                    else
-                    {
-                        statut_test = FAILURE;
-                        nb_tests_failed++;
-                    }
-                }
-                else
-                {
-                    gettimeofday(&end, NULL);
-                    nb_tests_failed++;
-                }
-                double duration = (end.tv_sec - start.tv_sec) * 1000LL + (end.tv_usec - start.tv_usec) / 1000;
-
-                statement_test.duration = duration;
-                statement_test.returned_statement = status;
-                statement_test.signal_caught = -1;
-                statement_test.statut_test = statut_test;
-
+                statement_test = testfw_run_test(&fw->tests[i], argc, argv, fw->timeout, &nb_tests_failed);
                 write(p[1], &statement_test, sizeof(statement_test));
             }
             close(p[1]);
@@ -443,14 +395,14 @@ int testfw_run_all(struct testfw_t *fw, int argc, char *argv[], enum testfw_mode
                 nb_tests_failed = testfw_run_display(fw, statement_test, fw->tests[i].suite, fw->tests[i].name, nb_tests_failed);
             }
             close(p[0]);
-            waitpid(pid, &wstatus, NULL);
+            waitpid(pid, &wstatus, 0);
             if (wstatus != EXIT_SUCCESS)
                 fprintf(stderr, "Error in the fork\n");
         }
 
         break;
     case TESTFW_NOFORK:
-        return testfw_sequential_run(fw, argc, argv);
+        return -1;
         break;
     case TESTFW_FORKP:
         //parallel fork as a BONUS
